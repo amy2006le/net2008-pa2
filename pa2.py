@@ -1,4 +1,4 @@
-# Name: Amy Le  Student ID:101343875
+# Name: Amy Le  Student ID: 101343875
 """NET2008 PA2 - audit a device inventory against a policy."""
 
 import json
@@ -10,6 +10,27 @@ import yaml
 
 class AuditError(Exception):
     """Raised when an input file cannot be used."""
+
+
+def parse_version(text):
+    """Turn '15.10' into (15, 10). Return None if it is not whole numbers."""
+    parts = str(text).strip().split(".")
+    for part in parts:
+        if not (part.isascii() and part.isdigit()):
+            return None
+    return tuple(int(part) for part in parts)
+
+
+def is_older(found, required):
+    """Return True if version 'found' is lower than 'required'.
+
+    Both are tuples of numbers. The shorter one is padded with zeros,
+    so 9.1 equals 9.1.0, and parts are compared as numbers, so 15.10 > 15.2.
+    """
+    length = max(len(found), len(required))
+    found = found + (0,) * (length - len(found))
+    required = required + (0,) * (length - len(required))
+    return found < required
 
 
 class Device:
@@ -43,9 +64,31 @@ class Device:
                 violations.append(
                     {"device": self.id, "type": "unknown_role", "role": self.role}
                 )
+            else:
+                required_text = str(allowed_roles[self.role])
+                found = parse_version(self.os)
+                required = parse_version(required_text)
+                if found is not None and required is not None:
+                    if is_older(found, required):
+                        violations.append(
+                            {
+                                "device": self.id,
+                                "type": "os_outdated",
+                                "found": self.os,
+                                "required": required_text,
+                            }
+                        )
 
         if policy.get("require_owner") is True and self.owner == "":
             violations.append({"device": self.id, "type": "missing_owner"})
+
+        limit = policy.get("max_down_interfaces")
+        if limit is not None:
+            down = self.count_interfaces()["down"]
+            if down > limit:
+                violations.append(
+                    {"device": self.id, "type": "too_many_down", "down": down}
+                )
 
         return violations
 
@@ -58,6 +101,8 @@ def load_devices(path):
         raise AuditError(f"{path}: file not found")
     except ET.ParseError:
         raise AuditError(f"{path}: not valid XML")
+    except OSError:
+        raise AuditError(f"{path}: cannot be read")
 
     devices = []
     skipped = 0
@@ -82,8 +127,10 @@ def load_policy(path):
             policy = yaml.safe_load(handle)
     except FileNotFoundError:
         raise AuditError(f"{path}: file not found")
-    except yaml.YAMLError:
+    except (yaml.YAMLError, UnicodeDecodeError):
         raise AuditError(f"{path}: not valid YAML")
+    except OSError:
+        raise AuditError(f"{path}: cannot be read")
 
     if policy is None:  # an empty file means no checks at all
         return {}
@@ -125,21 +172,34 @@ def build_report(site, devices, skipped, violations):
 
 def write_report(report, path):
     """Write the report dictionary to a JSON file."""
-    with open(path, "w", encoding="utf-8") as handle:
-        json.dump(report, handle, indent=2)
+    try:
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2)
+    except OSError:
+        raise AuditError(f"{path}: cannot be written")
 
 
-def main():
-    """Load both files, build the report, write audit.json, print a summary."""
-    site, devices, skipped = load_devices(sys.argv[1])
-    policy = load_policy(sys.argv[2])
-    violations = find_violations(devices, policy)
-    report = build_report(site, devices, skipped, violations)
-    write_report(report, "audit.json")
+def main(argv):
+    """Run the audit and return the exit code (0 ok, 1 bad file, 2 bad usage)."""
+    if len(argv) != 3:
+        print("usage: python pa2.py DEVICES.xml POLICY.yaml")
+        return 2
+
+    try:
+        site, devices, skipped = load_devices(argv[1])
+        policy = load_policy(argv[2])
+        violations = find_violations(devices, policy)
+        report = build_report(site, devices, skipped, violations)
+        write_report(report, "audit.json")
+    except AuditError as error:
+        print(error)
+        return 1
+
     print(f"site: {site}")
     print(f"devices: {len(devices)} kept, {skipped} skipped")
     print(f"violations: {len(violations)}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main(sys.argv))
