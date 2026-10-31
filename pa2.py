@@ -33,6 +33,19 @@ class Device:
                 counts["other"] += 1
         return counts
 
+    def check(self, policy):
+        """Return the list of policy violations for this device."""
+        violations = []
+
+        if "min_os" in policy:
+            allowed_roles = policy["min_os"] or {}
+            if self.role not in allowed_roles:
+                violations.append(
+                    {"device": self.id, "type": "unknown_role", "role": self.role}
+                )
+
+        return violations
+
 
 def load_devices(path):
     """Read the XML file and return (site, kept_devices, skipped_count)."""
@@ -76,6 +89,14 @@ def load_policy(path):
     return policy
 
 
+def find_violations(devices, policy):
+    """Check every device and return one combined list of violations."""
+    violations = []
+    for device in devices:
+        violations.extend(device.check(policy))
+    return violations
+
+
 def build_report(site, devices, skipped, violations):
     """Put all the results together in the dictionary that becomes audit.json."""
     roles = {}
@@ -109,11 +130,12 @@ def main():
     """Load both files, build the report, write audit.json, print a summary."""
     site, devices, skipped = load_devices(sys.argv[1])
     policy = load_policy(sys.argv[2])
-    print("policy:", policy)
-    report = build_report(site, devices, skipped, [])
+    violations = find_violations(devices, policy)
+    report = build_report(site, devices, skipped, violations)
     write_report(report, "audit.json")
     print(f"site: {site}")
     print(f"devices: {len(devices)} kept, {skipped} skipped")
+    print(f"violations: {len(violations)}")
 
 
 if __name__ == "__main__":
