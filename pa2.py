@@ -1,4 +1,4 @@
-# Name: Amy Le  Student ID: 101343875
+# Name: Amy Le  Student ID:101343875
 """NET2008 PA2 - audit a device inventory against a policy."""
 
 import json
@@ -43,6 +43,9 @@ class Device:
                 violations.append(
                     {"device": self.id, "type": "unknown_role", "role": self.role}
                 )
+
+        if policy.get("require_owner") is True and self.owner == "":
+            violations.append({"device": self.id, "type": "missing_owner"})
 
         return violations
 
