@@ -1,9 +1,11 @@
-# Name: Amy Le Student ID: 101343875
+# Name: Amy Le  Student ID: 101343875
 """NET2008 PA2 - audit a device inventory against a policy."""
 
 import json
 import sys
 import xml.etree.ElementTree as ET
+
+import yaml
 
 
 class AuditError(Exception):
@@ -57,6 +59,23 @@ def load_devices(path):
     return root.get("site"), devices, skipped
 
 
+def load_policy(path):
+    """Read the YAML policy and return it as a dictionary."""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            policy = yaml.safe_load(handle)
+    except FileNotFoundError:
+        raise AuditError(f"{path}: file not found")
+    except yaml.YAMLError:
+        raise AuditError(f"{path}: not valid YAML")
+
+    if policy is None:  # an empty file means no checks at all
+        return {}
+    if not isinstance(policy, dict):
+        raise AuditError(f"{path}: policy must be a mapping")
+    return policy
+
+
 def build_report(site, devices, skipped, violations):
     """Put all the results together in the dictionary that becomes audit.json."""
     roles = {}
@@ -87,8 +106,10 @@ def write_report(report, path):
 
 
 def main():
-    """Load the inventory, build the report, write audit.json, print a summary."""
+    """Load both files, build the report, write audit.json, print a summary."""
     site, devices, skipped = load_devices(sys.argv[1])
+    policy = load_policy(sys.argv[2])
+    print("policy:", policy)
     report = build_report(site, devices, skipped, [])
     write_report(report, "audit.json")
     print(f"site: {site}")
